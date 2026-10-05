@@ -17,26 +17,41 @@ export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('public');
   const [links, setLinks] = useState<MicrositeLink[]>(() => storageService.getLinks());
   const [profile, setProfile] = useState<ProfileData>(() => storageService.getProfile());
+  const [isLiveConnected, setIsLiveConnected] = useState<boolean>(false);
 
   // Function to reload data from storage
   const refreshData = useCallback(() => {
     setLinks(storageService.getLinks());
     setProfile(storageService.getProfile());
+    setIsLiveConnected(true);
   }, []);
 
-  // Listen to realtime changes across tabs and Firestore
+  // Listen to realtime changes across devices and Firestore
   useEffect(() => {
-    // Bootstrap and test Firestore
-    storageService.initFirestore(refreshData);
+    // Bootstrap and connect Firestore
+    storageService.initFirestore(() => {
+      setIsLiveConnected(true);
+      setLinks(storageService.getLinks());
+      setProfile(storageService.getProfile());
+    });
 
-    const unsubscribe = storageService.subscribe(() => {
-      refreshData();
+    // Realtime onSnapshot listener
+    const unsubscribe = storageService.subscribe((type, data) => {
+      setIsLiveConnected(true);
+      if (type === 'links_updated' && Array.isArray(data)) {
+        setLinks([...data]);
+      } else if (type === 'profile_updated' && data) {
+        setProfile({ ...(data as ProfileData) });
+      } else {
+        setLinks(storageService.getLinks());
+        setProfile(storageService.getProfile());
+      }
     });
 
     return () => {
       unsubscribe();
     };
-  }, [refreshData]);
+  }, []);
 
   // Click handler for links
   const handleLinkClick = async (id: string) => {
@@ -70,6 +85,7 @@ export default function App() {
           links={links}
           onLinkClick={handleLinkClick}
           onOpenAdmin={handleOpenAdmin}
+          isLiveConnected={isLiveConnected}
         />
       )}
 

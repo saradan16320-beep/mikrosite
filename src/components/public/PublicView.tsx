@@ -25,6 +25,7 @@ interface PublicViewProps {
   links: MicrositeLink[];
   onLinkClick: (id: string) => void;
   onOpenAdmin: () => void;
+  isLiveConnected?: boolean;
 }
 
 export const PublicView: React.FC<PublicViewProps> = ({
@@ -32,6 +33,7 @@ export const PublicView: React.FC<PublicViewProps> = ({
   links,
   onLinkClick,
   onOpenAdmin,
+  isLiveConnected = true,
 }) => {
   const { themeMode, isDark, setThemeMode, toggleTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -88,9 +90,15 @@ export const PublicView: React.FC<PublicViewProps> = ({
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
           {/* Logo or Micro-badge */}
           <div className="flex items-center gap-2">
-            <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isLiveConnected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLiveConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            </span>
+            <span className="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-300">
               {profile.handle || 'portal-link'}
+            </span>
+            <span className="hidden sm:inline-flex text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/80">
+              Realtime Firebase
             </span>
           </div>
 
