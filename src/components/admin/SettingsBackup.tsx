@@ -26,7 +26,7 @@ export const SettingsBackup: React.FC<SettingsBackupProps> = ({ onRefreshData })
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
 
-  const handleUpdatePassword = (e: React.FormEvent) => {
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordMsg(null);
 
@@ -46,8 +46,8 @@ export const SettingsBackup: React.FC<SettingsBackupProps> = ({ onRefreshData })
     }
 
     const finalPass = newPassword ? newPassword : currentCreds.passwordHash;
-    storageService.updateAdminCredentials(username.trim(), finalPass);
-    setPasswordMsg({ type: 'success', text: 'Kredensial login admin berhasil diperbarui!' });
+    await storageService.updateAdminCredentials(username.trim(), finalPass);
+    setPasswordMsg({ type: 'success', text: 'Kredensial login admin berhasil diperbarui di database Firebase!' });
     setNewPassword('');
     setConfirmPassword('');
   };
@@ -68,9 +68,9 @@ export const SettingsBackup: React.FC<SettingsBackupProps> = ({ onRefreshData })
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const content = event.target?.result as string;
-      const res = storageService.importData(content);
+      const res = await storageService.importData(content);
       if (res.success) {
         setImportStatus({ type: 'success', text: res.message });
         onRefreshData();
@@ -83,11 +83,11 @@ export const SettingsBackup: React.FC<SettingsBackupProps> = ({ onRefreshData })
     e.target.value = '';
   };
 
-  const handleResetToDefault = () => {
-    storageService.resetAll();
+  const handleResetToDefault = async () => {
+    await storageService.resetAll();
     setShowConfirmReset(false);
     onRefreshData();
-    setImportStatus({ type: 'success', text: 'Semua data mikrosite dikembalikan ke setelan awal!' });
+    setImportStatus({ type: 'success', text: 'Semua data mikrosite dikembalikan ke setelan awal di database Firebase!' });
   };
 
   return (

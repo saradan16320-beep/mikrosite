@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Lock, User, Eye, EyeOff, ArrowLeft, ShieldCheck, KeyRound } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, ArrowLeft, ShieldCheck, KeyRound, Sun, Moon, Monitor } from 'lucide-react';
 import { storageService } from '../../services/storageService';
+import { useTheme } from '../../context/ThemeContext';
 
 interface AdminLoginProps {
   onSuccess: () => void;
@@ -8,26 +9,30 @@ interface AdminLoginProps {
 }
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBackToPublic }) => {
+  const { themeMode, setThemeMode } = useTheme();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin123');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
-    setTimeout(() => {
-      const ok = storageService.loginAdmin(username, password);
+    try {
+      const ok = await storageService.loginAdmin(username, password);
       if (ok) {
         onSuccess();
       } else {
         setError('Username atau kata sandi tidak cocok. Silakan periksa kembali.');
       }
+    } catch {
+      setError('Terjadi kendala saat memeriksa kredensial login.');
+    } finally {
       setLoading(false);
-    }, 300);
+    }
   };
 
   const handleAutoFill = () => {
@@ -40,14 +45,46 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBackToPubli
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 transition-colors">
       <div className="w-full max-w-md">
-        {/* Back Button */}
-        <button
-          onClick={onBackToPublic}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Kembali ke Halaman Publik</span>
-        </button>
+        {/* Top bar with Back Button and Theme Toggle */}
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={onBackToPublic}
+            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Kembali ke Halaman Publik</span>
+          </button>
+
+          <div className="inline-flex items-center p-1 rounded-xl bg-slate-200/80 dark:bg-slate-800 border border-slate-300/60 dark:border-slate-700/60">
+            <button
+              onClick={() => setThemeMode('light')}
+              title="Mode Terang"
+              className={`p-1 rounded-lg transition-colors ${
+                themeMode === 'light' ? 'bg-white dark:bg-slate-700 text-amber-500 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              <Sun className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setThemeMode('dark')}
+              title="Mode Gelap"
+              className={`p-1 rounded-lg transition-colors ${
+                themeMode === 'dark' ? 'bg-white dark:bg-slate-700 text-indigo-400 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              <Moon className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setThemeMode('system')}
+              title="Mode Otomatis (Sistem)"
+              className={`p-1 rounded-lg transition-colors ${
+                themeMode === 'system' ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              <Monitor className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
 
         {/* Card */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">

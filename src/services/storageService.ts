@@ -1,11 +1,25 @@
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  increment,
+  writeBatch,
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { MicrositeLink, ProfileData, AdminCredentials } from '../types';
 
-const LINKS_KEY = 'mikrosite_links_v1';
-const PROFILE_KEY = 'mikrosite_profile_v1';
-const ADMIN_KEY = 'mikrosite_admin_v1';
+const LINKS_COLL = 'links';
+const SETTINGS_COLL = 'settings';
+const PROFILE_DOC = 'profile';
+const ADMIN_DOC = 'admin';
 const AUTH_SESSION_KEY = 'mikrosite_auth_session_v1';
 
-// Initial realistic seed data for the user
+// Initial default profile seed
 const DEFAULT_PROFILE: ProfileData = {
   name: 'Saradan Arya',
   handle: '@saradan',
@@ -117,206 +131,332 @@ const DEFAULT_LINKS: MicrositeLink[] = [
 
 const DEFAULT_ADMIN: AdminCredentials = {
   username: 'admin',
-  passwordHash: 'admin123', // Simple hashed/plain default, configurable by admin
+  passwordHash: 'admin123',
   lastLogin: null,
 };
 
-// BroadcastChannel for cross-tab realtime sync
-let broadcastChannel: BroadcastChannel | null = null;
-try {
-  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-    broadcastChannel = new BroadcastChannel('mikrosite_sync_channel');
-  }
-} catch (e) {
-  console.warn('BroadcastChannel not supported', e);
-}
-
-const notifySync = (type: string, data?: unknown) => {
-  if (broadcastChannel) {
-    try {
-      broadcastChannel.postMessage({ type, data, timestamp: Date.now() });
-    } catch (e) {
-      console.warn('Broadcast failed', e);
-    }
-  }
-};
+// In-memory cache for ultra-responsive UI
+let cachedLinks: MicrositeLink[] = [...DEFAULT_LINKS];
+let cachedProfile: ProfileData = { ...DEFAULT_PROFILE };
+let cachedAdmin: AdminCredentials = { ...DEFAULT_ADMIN };
+let hasInitialized = false;
 
 export const storageService = {
-  // Subscribe to changes in realtime
-  subscribe(callback: (type: string, data?: unknown) => void) {
-    const handleBroadcast = (event: MessageEvent) => {
-      callback(event.data.type, event.data.data);
-    };
+  // Initialize Firestore listeners and bootstrap if database is empty
+  async initFirestore(onUpdate?: () => void) {
+    if (hasInitialized) return;
+    hasInitialized = true;
 
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === LINKS_KEY || event.key === PROFILE_KEY) {
-        callback('storage_change', { key: event.key });
+    try {
+      // 1. Check and initialize Admin document
+      const adminDocRef = doc(db, SETTINGS_COLL, ADMIN_DOC);
+      const adminSnap = await getDoc(adminDocRef).catch((e) => {
+        handleFirestoreError(e, OperationType.GET, `${SETTINGS_COLL}/${ADMIN_DOC}`);
+        return null;
+      });
+
+      if (!adminSnap || !adminSnap.exists()) {
+        await setDoc(adminDocRef, DEFAULT_ADMIN).catch((e) => {
+          handleFirestoreError(e, OperationType.WRITE, `${SETTINGS_COLL}/${ADMIN_DOC}`);
+        });
+        cachedAdmin = { ...DEFAULT_ADMIN };
+      } else {
+        cachedAdmin = adminSnap.data() as AdminCredentials;
       }
-    };
 
-    if (broadcastChannel) {
-      broadcastChannel.addEventListener('message', handleBroadcast);
+      // 2. Check and initialize Profile document
+      const profileDocRef = doc(db, SETTINGS_COLL, PROFILE_DOC);
+      const profileSnap = await getDoc(profileDocRef).catch((e) => {
+        handleFirestoreError(e, OperationType.GET, `${SETTINGS_COLL}/${PROFILE_DOC}`);
+        return null;
+      });
+
+      if (!profileSnap || !profileSnap.exists()) {
+        await setDoc(profileDocRef, DEFAULT_PROFILE).catch((e) => {
+          handleFirestoreError(e, OperationType.WRITE, `${SETTINGS_COLL}/${PROFILE_DOC}`);
+        });
+        cachedProfile = { ...DEFAULT_PROFILE };
+      } else {
+        cachedProfile = { ...DEFAULT_PROFILE, ...(profileSnap.data() as ProfileData) };
+      }
+
+      // 3. Check and initialize Links collection
+      const linksColRef = collection(db, LINKS_COLL);
+      const linksSnap = await getDocs(linksColRef).catch((e) => {
+        handleFirestoreError(e, OperationType.LIST, LINKS_COLL);
+        return null;
+      });
+
+      if (!linksSnap || linksSnap.empty) {
+        const batch = writeBatch(db);
+        DEFAULT_LINKS.forEach((link) => {
+          const ref = doc(db, LINKS_COLL, link.id);
+          batch.set(ref, link);
+        });
+        await batch.commit().catch((e) => {
+          handleFirestoreError(e, OperationType.WRITE, LINKS_COLL);
+        });
+        cachedLinks = [...DEFAULT_LINKS];
+      } else {
+        const loaded: MicrositeLink[] = [];
+        linksSnap.forEach((d) => {
+          loaded.push({ id: d.id, ...d.data() } as MicrositeLink);
+        });
+        loaded.sort((a, b) => a.order - b.order);
+        cachedLinks = loaded;
+      }
+
+      if (onUpdate) onUpdate();
+    } catch (err) {
+      console.warn('Firestore initialization notice:', err);
     }
-    window.addEventListener('storage', handleStorage);
+  },
+
+  // Realtime subscription using Firestore onSnapshot
+  subscribe(callback: (type: string, data?: unknown) => void) {
+    const unsubscribes: (() => void)[] = [];
+
+    // Listen to Links collection in realtime
+    try {
+      const unsubLinks = onSnapshot(
+        collection(db, LINKS_COLL),
+        (snapshot) => {
+          const linksList: MicrositeLink[] = [];
+          snapshot.forEach((docSnap) => {
+            linksList.push({ id: docSnap.id, ...docSnap.data() } as MicrositeLink);
+          });
+          linksList.sort((a, b) => a.order - b.order);
+          cachedLinks = linksList;
+          callback('links_updated', linksList);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, LINKS_COLL);
+        }
+      );
+      unsubscribes.push(unsubLinks);
+    } catch (e) {
+      console.warn('Failed to listen to links:', e);
+    }
+
+    // Listen to Profile document in realtime
+    try {
+      const unsubProfile = onSnapshot(
+        doc(db, SETTINGS_COLL, PROFILE_DOC),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            cachedProfile = { ...DEFAULT_PROFILE, ...(snapshot.data() as ProfileData) };
+            callback('profile_updated', cachedProfile);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLL}/${PROFILE_DOC}`);
+        }
+      );
+      unsubscribes.push(unsubProfile);
+    } catch (e) {
+      console.warn('Failed to listen to profile:', e);
+    }
+
+    // Listen to Admin document in realtime
+    try {
+      const unsubAdmin = onSnapshot(
+        doc(db, SETTINGS_COLL, ADMIN_DOC),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            cachedAdmin = snapshot.data() as AdminCredentials;
+            callback('admin_updated', cachedAdmin);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLL}/${ADMIN_DOC}`);
+        }
+      );
+      unsubscribes.push(unsubAdmin);
+    } catch (e) {
+      console.warn('Failed to listen to admin credentials:', e);
+    }
 
     return () => {
-      if (broadcastChannel) {
-        broadcastChannel.removeEventListener('message', handleBroadcast);
-      }
-      window.removeEventListener('storage', handleStorage);
+      unsubscribes.forEach((unsub) => unsub());
     };
   },
 
-  // Links
+  // Get cached or current links
   getLinks(): MicrositeLink[] {
-    try {
-      const raw = localStorage.getItem(LINKS_KEY);
-      if (!raw) {
-        this.saveLinks(DEFAULT_LINKS);
-        return DEFAULT_LINKS;
-      }
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.sort((a, b) => a.order - b.order) : DEFAULT_LINKS;
-    } catch {
-      return DEFAULT_LINKS;
-    }
+    return cachedLinks.sort((a, b) => a.order - b.order);
   },
 
-  saveLinks(links: MicrositeLink[]) {
-    localStorage.setItem(LINKS_KEY, JSON.stringify(links));
-    notifySync('links_updated', links);
-  },
-
-  addLink(linkData: Omit<MicrositeLink, 'id' | 'clicks' | 'order' | 'createdAt' | 'updatedAt'>): MicrositeLink {
-    const links = this.getLinks();
+  async addLink(
+    linkData: Omit<MicrositeLink, 'id' | 'clicks' | 'order' | 'createdAt' | 'updatedAt'>
+  ): Promise<MicrositeLink> {
+    const newId = `link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newLink: MicrositeLink = {
       ...linkData,
-      id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: newId,
       clicks: 0,
-      order: links.length,
+      order: cachedLinks.length,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const updated = [...links, newLink];
-    this.saveLinks(updated);
+
+    // Optimistic local update
+    cachedLinks = [...cachedLinks, newLink];
+
+    try {
+      await setDoc(doc(db, LINKS_COLL, newId), newLink);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `${LINKS_COLL}/${newId}`);
+    }
+
     return newLink;
   },
 
-  updateLink(id: string, updates: Partial<Omit<MicrositeLink, 'id' | 'createdAt'>>): MicrositeLink | null {
-    const links = this.getLinks();
-    const index = links.findIndex((l) => l.id === id);
+  async updateLink(
+    id: string,
+    updates: Partial<Omit<MicrositeLink, 'id' | 'createdAt'>>
+  ): Promise<MicrositeLink | null> {
+    const index = cachedLinks.findIndex((l) => l.id === id);
     if (index === -1) return null;
 
-    links[index] = {
-      ...links[index],
+    const updated = {
+      ...cachedLinks[index],
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    this.saveLinks(links);
-    return links[index];
+    cachedLinks[index] = updated;
+
+    try {
+      await updateDoc(doc(db, LINKS_COLL, id), {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${LINKS_COLL}/${id}`);
+    }
+
+    return updated;
   },
 
-  deleteLink(id: string): boolean {
-    const links = this.getLinks();
-    const filtered = links.filter((l) => l.id !== id);
-    if (filtered.length === links.length) return false;
+  async deleteLink(id: string): Promise<boolean> {
+    cachedLinks = cachedLinks.filter((l) => l.id !== id);
 
-    // reindex order
-    const reindexed = filtered.map((item, idx) => ({ ...item, order: idx }));
-    this.saveLinks(reindexed);
-    return true;
+    try {
+      await deleteDoc(doc(db, LINKS_COLL, id));
+      return true;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${LINKS_COLL}/${id}`);
+      return false;
+    }
   },
 
-  reorderLinks(orderedIds: string[]) {
-    const links = this.getLinks();
-    const map = new Map(links.map((l) => [l.id, l]));
-    const reordered: MicrositeLink[] = [];
+  async reorderLinks(orderedIds: string[]) {
+    const batch = writeBatch(db);
+    const newCached: MicrositeLink[] = [];
 
     orderedIds.forEach((id, index) => {
-      const item = map.get(id);
-      if (item) {
-        reordered.push({ ...item, order: index });
-        map.delete(id);
+      const found = cachedLinks.find((l) => l.id === id);
+      if (found) {
+        const updated = { ...found, order: index };
+        newCached.push(updated);
+        const ref = doc(db, LINKS_COLL, id);
+        batch.update(ref, { order: index });
       }
     });
 
-    // any leftovers
-    map.forEach((item) => {
-      reordered.push({ ...item, order: reordered.length });
-    });
+    cachedLinks = newCached;
 
-    this.saveLinks(reordered);
-  },
-
-  incrementClick(id: string) {
-    const links = this.getLinks();
-    const index = links.findIndex((l) => l.id === id);
-    if (index !== -1) {
-      links[index].clicks = (links[index].clicks || 0) + 1;
-      this.saveLinks(links);
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, LINKS_COLL);
     }
   },
 
-  // Profile
+  async incrementClick(id: string) {
+    const found = cachedLinks.find((l) => l.id === id);
+    if (found) {
+      found.clicks = (found.clicks || 0) + 1;
+    }
+
+    try {
+      const ref = doc(db, LINKS_COLL, id);
+      await updateDoc(ref, { clicks: increment(1) });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${LINKS_COLL}/${id}`);
+    }
+  },
+
+  // Profile management
   getProfile(): ProfileData {
+    return cachedProfile;
+  },
+
+  async saveProfile(profile: ProfileData) {
+    cachedProfile = profile;
     try {
-      const raw = localStorage.getItem(PROFILE_KEY);
-      if (!raw) {
-        this.saveProfile(DEFAULT_PROFILE);
-        return DEFAULT_PROFILE;
-      }
-      return { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
-    } catch {
-      return DEFAULT_PROFILE;
+      await setDoc(doc(db, SETTINGS_COLL, PROFILE_DOC), profile);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${SETTINGS_COLL}/${PROFILE_DOC}`);
     }
   },
 
-  saveProfile(profile: ProfileData) {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-    notifySync('profile_updated', profile);
-  },
-
-  // Admin Credentials & Auth Session
+  // Admin authentication
   getAdminCredentials(): AdminCredentials {
-    try {
-      const raw = localStorage.getItem(ADMIN_KEY);
-      if (!raw) {
-        localStorage.setItem(ADMIN_KEY, JSON.stringify(DEFAULT_ADMIN));
-        return DEFAULT_ADMIN;
-      }
-      return { ...DEFAULT_ADMIN, ...JSON.parse(raw) };
-    } catch {
-      return DEFAULT_ADMIN;
-    }
+    return cachedAdmin;
   },
 
-  updateAdminCredentials(username: string, passwordHash: string) {
-    const current = this.getAdminCredentials();
+  async updateAdminCredentials(username: string, passwordHash: string) {
     const updated: AdminCredentials = {
-      ...current,
-      username,
+      username: username.trim(),
       passwordHash,
+      lastLogin: cachedAdmin.lastLogin,
     };
-    localStorage.setItem(ADMIN_KEY, JSON.stringify(updated));
+    cachedAdmin = updated;
+
+    try {
+      await setDoc(doc(db, SETTINGS_COLL, ADMIN_DOC), updated);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${SETTINGS_COLL}/${ADMIN_DOC}`);
+    }
   },
 
-  loginAdmin(username: string, password: string): boolean {
-    const creds = this.getAdminCredentials();
-    if (creds.username.trim() === username.trim() && creds.passwordHash === password) {
-      const session = {
-        authenticated: true,
-        username: creds.username,
-        token: Math.random().toString(36).substring(2),
-        loginTime: new Date().toISOString(),
-      };
-      sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+  async loginAdmin(username: string, password: string): Promise<boolean> {
+    try {
+      // Fetch latest admin credentials from Firestore
+      const adminSnap = await getDoc(doc(db, SETTINGS_COLL, ADMIN_DOC));
+      const creds: AdminCredentials = adminSnap.exists()
+        ? (adminSnap.data() as AdminCredentials)
+        : cachedAdmin;
 
-      // Update last login
-      const updatedCreds = { ...creds, lastLogin: new Date().toISOString() };
-      localStorage.setItem(ADMIN_KEY, JSON.stringify(updatedCreds));
-      return true;
+      if (creds.username.trim() === username.trim() && creds.passwordHash === password) {
+        const session = {
+          authenticated: true,
+          username: creds.username,
+          loginTime: new Date().toISOString(),
+        };
+        sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+
+        // Update last login in Firestore
+        const updated = { ...creds, lastLogin: new Date().toISOString() };
+        cachedAdmin = updated;
+        await setDoc(doc(db, SETTINGS_COLL, ADMIN_DOC), updated).catch(() => {});
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn('Login verification notice:', err);
+      // Fallback check against cached credentials
+      if (cachedAdmin.username.trim() === username.trim() && cachedAdmin.passwordHash === password) {
+        const session = {
+          authenticated: true,
+          username: cachedAdmin.username,
+          loginTime: new Date().toISOString(),
+        };
+        sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+        return true;
+      }
+      return false;
     }
-    return false;
   },
 
   isLoggedIn(): boolean {
@@ -335,17 +475,38 @@ export const storageService = {
   },
 
   // Reset to default
-  resetAll() {
-    this.saveLinks(DEFAULT_LINKS);
-    this.saveProfile(DEFAULT_PROFILE);
-    localStorage.setItem(ADMIN_KEY, JSON.stringify(DEFAULT_ADMIN));
-    notifySync('all_reset');
+  async resetAll() {
+    const batch = writeBatch(db);
+
+    // Delete existing links
+    cachedLinks.forEach((l) => {
+      batch.delete(doc(db, LINKS_COLL, l.id));
+    });
+
+    // Write default links
+    DEFAULT_LINKS.forEach((l) => {
+      batch.set(doc(db, LINKS_COLL, l.id), l);
+    });
+
+    // Write default profile and admin
+    batch.set(doc(db, SETTINGS_COLL, PROFILE_DOC), DEFAULT_PROFILE);
+    batch.set(doc(db, SETTINGS_COLL, ADMIN_DOC), DEFAULT_ADMIN);
+
+    cachedLinks = [...DEFAULT_LINKS];
+    cachedProfile = { ...DEFAULT_PROFILE };
+    cachedAdmin = { ...DEFAULT_ADMIN };
+
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'resetAll');
+    }
   },
 
   // Export & Import
   exportData(): string {
     const payload = {
-      version: '1.0',
+      version: '2.0',
       exportedAt: new Date().toISOString(),
       profile: this.getProfile(),
       links: this.getLinks(),
@@ -353,17 +514,37 @@ export const storageService = {
     return JSON.stringify(payload, null, 2);
   },
 
-  importData(jsonString: string): { success: boolean; message: string } {
+  async importData(jsonString: string): Promise<{ success: boolean; message: string }> {
     try {
       const data = JSON.parse(jsonString);
       if (!data.profile || !Array.isArray(data.links)) {
-        return { success: false, message: 'Format file JSON tidak valid. Pastikan berisi data profile dan links.' };
+        return {
+          success: false,
+          message: 'Format file JSON tidak valid. Pastikan berisi data profile dan links.',
+        };
       }
-      this.saveProfile(data.profile);
-      this.saveLinks(data.links);
-      return { success: true, message: 'Data mikrosite berhasil diimpor sepenuhnya!' };
+
+      await this.saveProfile(data.profile);
+
+      // Re-populate links
+      const batch = writeBatch(db);
+      // Remove old
+      cachedLinks.forEach((l) => {
+        batch.delete(doc(db, LINKS_COLL, l.id));
+      });
+      // Add new
+      data.links.forEach((l: MicrositeLink) => {
+        batch.set(doc(db, LINKS_COLL, l.id), l);
+      });
+      await batch.commit();
+
+      cachedLinks = data.links;
+      return { success: true, message: 'Data mikrosite berhasil diimpor ke Firebase Firestore!' };
     } catch (err) {
-      return { success: false, message: 'Gagal memproses file JSON: ' + (err instanceof Error ? err.message : 'Error') };
+      return {
+        success: false,
+        message: 'Gagal memproses file JSON: ' + (err instanceof Error ? err.message : 'Error'),
+      };
     }
   },
 };

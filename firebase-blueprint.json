@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "Link": {
+      "title": "Link",
+      "description": "Tautan mikrosite pribadi yang ditampilkan ke pengunjung",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "url": { "type": "string", "maxLength": 500 },
+        "description": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "maxLength": 50 },
+        "icon": { "type": "string", "maxLength": 50 },
+        "clicks": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" },
+        "order": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "url", "category", "icon", "clicks", "isActive", "isFeatured", "order"]
+    },
+    "Profile": {
+      "title": "Profile",
+      "description": "Konfigurasi profil pemilik mikrosite dan tema",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "handle": { "type": "string", "maxLength": 50 },
+        "title": { "type": "string", "maxLength": 150 },
+        "bio": { "type": "string", "maxLength": 1000 },
+        "avatarUrl": { "type": "string", "maxLength": 500 },
+        "verified": { "type": "boolean" },
+        "location": { "type": "string", "maxLength": 100 },
+        "statusText": { "type": "string", "maxLength": 150 },
+        "themeColor": { "type": "string", "maxLength": 30 },
+        "backgroundStyle": { "type": "string", "maxLength": 30 },
+        "socialLinks": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "handle"]
+    },
+    "AdminCredential": {
+      "title": "AdminCredential",
+      "description": "Kredensial autentikasi administrator yang tersimpan di database",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "maxLength": 50 },
+        "passwordHash": { "type": "string", "maxLength": 200 },
+        "lastLogin": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["username", "passwordHash"]
+    }
+  },
+  "firestore": {
+    "/links/{linkId}": {
+      "schema": { "$ref": "#/entities/Link" },
+      "description": "Koleksi tautan yang dikelola admin dan dapat dibaca publik"
+    },
+    "/settings/profile": {
+      "schema": { "$ref": "#/entities/Profile" },
+      "description": "Dokumen profil dan kustomisasi visual mikrosite"
+    },
+    "/settings/admin": {
+      "schema": { "$ref": "#/entities/AdminCredential" },
+      "description": "Dokumen kredensial login administrator"
+    }
+  }
+}

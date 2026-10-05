@@ -85,32 +85,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsModalOpen(true);
   };
 
-  const handleSaveLink = (data: Omit<MicrositeLink, 'id' | 'clicks' | 'order' | 'createdAt' | 'updatedAt'>) => {
+  const handleSaveLink = async (data: Omit<MicrositeLink, 'id' | 'clicks' | 'order' | 'createdAt' | 'updatedAt'>) => {
     if (editingLink) {
-      storageService.updateLink(editingLink.id, data);
+      await storageService.updateLink(editingLink.id, data);
     } else {
-      storageService.addLink(data);
+      await storageService.addLink(data);
     }
     onRefreshData();
   };
 
-  const handleDeleteLink = (id: string) => {
-    storageService.deleteLink(id);
+  const handleDeleteLink = async (id: string) => {
+    await storageService.deleteLink(id);
     setDeleteConfirmId(null);
     onRefreshData();
   };
 
-  const handleToggleActive = (id: string, current: boolean) => {
-    storageService.updateLink(id, { isActive: !current });
+  const handleToggleActive = async (id: string, current: boolean) => {
+    await storageService.updateLink(id, { isActive: !current });
     onRefreshData();
   };
 
-  const handleToggleFeatured = (id: string, current: boolean) => {
-    storageService.updateLink(id, { isFeatured: !current });
+  const handleToggleFeatured = async (id: string, current: boolean) => {
+    await storageService.updateLink(id, { isFeatured: !current });
     onRefreshData();
   };
 
-  const handleMove = (index: number, direction: 'up' | 'down') => {
+  const handleMove = async (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= links.length) return;
 
@@ -119,19 +119,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     newLinks[index] = newLinks[targetIndex];
     newLinks[targetIndex] = temp;
 
-    storageService.reorderLinks(newLinks.map((l) => l.id));
+    await storageService.reorderLinks(newLinks.map((l) => l.id));
     onRefreshData();
   };
 
-  const handleSaveProfile = (updated: ProfileData) => {
-    storageService.saveProfile(updated);
+  const handleSaveProfile = async (updated: ProfileData) => {
+    await storageService.saveProfile(updated);
     onRefreshData();
   };
 
-  const handleResetClicks = () => {
-    links.forEach((l) => {
-      storageService.updateLink(l.id, { clicks: 0 });
-    });
+  const handleResetClicks = async () => {
+    for (const l of links) {
+      await storageService.updateLink(l.id, { clicks: 0 });
+    }
     onRefreshData();
   };
 

@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Test document for connection verification
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // Links collection for the microsite
+    match /links/{linkId} {
+      allow read, write: if true;
+    }
+
+    // Settings (profile, admin credentials)
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
+
+    // Global safety fallback
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

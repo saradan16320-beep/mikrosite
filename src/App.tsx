@@ -24,8 +24,11 @@ export default function App() {
     setProfile(storageService.getProfile());
   }, []);
 
-  // Listen to realtime changes across tabs and local events
+  // Listen to realtime changes across tabs and Firestore
   useEffect(() => {
+    // Bootstrap and test Firestore
+    storageService.initFirestore(refreshData);
+
     const unsubscribe = storageService.subscribe(() => {
       refreshData();
     });
@@ -36,8 +39,8 @@ export default function App() {
   }, [refreshData]);
 
   // Click handler for links
-  const handleLinkClick = (id: string) => {
-    storageService.incrementClick(id);
+  const handleLinkClick = async (id: string) => {
+    await storageService.incrementClick(id);
     refreshData();
   };
 
