@@ -1,0 +1,6 @@
+{
+  "name": "Mikrosite Pribadi & Portal Link",
+  "description": "Mikrosite link pribadi modern, responsif dengan mode gelap otomatis, integrasi media sosial, dan panel administrator realtime untuk mengelola tautan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
